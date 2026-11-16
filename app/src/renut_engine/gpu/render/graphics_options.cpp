@@ -1,0 +1,163 @@
+/**
+ * @file    gpu/render/graphics_options.cpp
+ */
+#include "renut_engine/gpu/render/graphics_options.h"
+
+#include <cstdlib>
+#include <string>
+
+#include <rex/cvar.h>
+#include <rex/types.h>
+
+#include "renut_engine/gpu/backend/backend.h"
+#include "renut_engine/gpu/guest/widescreen.h"
+#include "renut_engine/gpu/render/format.h"
+
+REXCVAR_DEFINE_INT32(renut_unscaled_max_size, 0, "Nuts&Bolts/Graphics",
+                     "Render targets at most this many pixels wide and high stay at 1x when the scene renders below "
+                     "720p (lookup tables such as a colour-grading LUT); 0 = every target follows the resolution")
+    .range(0, 256)
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+// Dishonored (2026-11-09, console: a walking guard's shadow disappears and comes back, with occlusion culling off too):
+// UE3's character shadows render into an 800x800 depth target, which followed the 360p scene to 400x400. On: square
+// depth targets of 256 px or more (the shadow maps; the scene's depth is 1280x720 / 640x360) stay at 1x.
+REXCVAR_DEFINE_BOOL(renut_shadow_unscaled, false, "Nuts&Bolts/Graphics",
+                    "Square depth targets of 256 px or more (shadow maps) stay at 1x when the scene renders lower")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_STRING(renut_shadow_resolution,"Resolution", "Nuts&Bolts/Graphics",
+                      "Shadow map resolution, as a multiple of the console's: Resolution follows "
+                      "renut_resolution; 1x is the console's; 2x, 3x and 4x are sharper.")
+    .allowed({"Resolution", "1x", "2x", "3x", "4x"});
+
+REXCVAR_DEFINE_STRING(renut_ambient_occlusion, "Half", "Nuts&Bolts/Graphics",
+                      "Ambient occlusion (SSAO) resolution: Half the screen's, as on the console, "
+                      "or Full.")
+    .allowed({"Half", "Full"});
+
+REXCVAR_DEFINE_STRING(renut_anisotropic_filtering, "Game", "Nuts&Bolts/Graphics",
+                      "Anisotropic texture filtering: the game's own, or at least 2x, 4x, 8x or "
+                      "16x.")
+    .allowed({"Game", "2x", "4x", "8x", "16x"});
+
+// sa2-nx (2026-10-20): "Game" by default: SA2's picture stays the console's (16-bit buffers change it).
+REXCVAR_DEFINE_STRING(renut_post_process_precision, "Game", "Nuts&Bolts/Graphics",
+                      "Precision of the bloom, depth of field and SSAO buffers: Game keeps the "
+                      "console's 8 bits (faint glow shows as blobs sliding over dark areas), High "
+                      "uses 16 bits.")
+    .allowed({"Game", "High"});
+
+namespace renut::gpu {
+
+namespace {
+
+// D3DFORMAT low bits of D3DFMT_D24S8 (the shadow maps; the scene's depth is
+// D24FS8).
+constexpr u32 kFormatD24S8 = 22;
+// The SSAO targets' EDRAM base (sub_8235F810).
+constexpr u32 kAmbientOcclusionEdramBase = 1864;
+// The game's screen height (widescreen.h).
+constexpr u32 kGuestScreenHeight = 720;
+
+bool IsShadowMap(const d3d::SurfaceDesc &desc, u32 width, u32 height) {
+  if (width != height)
+    return false;
+  if ((u32(desc.Format) & 0x3F) == kFormatD24S8)
+    return width == 512 || width == 768 || width == 1024;
+  // The local lights' depth, converted for their atlas.
+  return !d3d::IsDepthFormat(desc.Format) && width == 512 &&
+         GpuColorFormat((u32(desc.ColorInfo) >> 16) & 0xF) == GpuColorFormat::Fmt16_16_Float;
+}
+
+bool IsAmbientOcclusion(const d3d::SurfaceDesc &desc, u32 width, u32 height) {
+  return !d3d::IsDepthFormat(desc.Format) && width == 640 && height == 360 &&
+         (u32(desc.ColorInfo) & 0xFFF) == kAmbientOcclusionEdramBase;
+}
+
+// A quarter of the screen or less: the post-processing buffers (depth of
+// field and bloom, 320x180 down to 20x11 at 1280x720). Their blurs average a
+// few taps 2 of their own texels apart, made for buffers box-downsampled from
+// the screen; rendered at a higher scale, the buffers keep detail those taps
+// step over, so edges come out as ghost copies rather than blurred.
+bool IsPostProcessBuffer(const d3d::SurfaceDesc &desc, u32 width, u32 height) {
+  return !d3d::IsDepthFormat(desc.Format) && width * 4 <= GuestScreenWidth() &&
+         height * 4 <= kGuestScreenHeight;
+}
+
+// Half the screen or less, single-sampled, 8_8_8_8: the bloom's bright pass
+// (640x360) and the post-processing buffers below it, and the SSAO targets.
+bool IsLowPrecisionPostTarget(const d3d::SurfaceDesc &desc) {
+  const u32 width = d3d::SurfaceWidth(desc.Size);
+  const u32 height = d3d::SurfaceHeight(desc.Size);
+  return !d3d::IsDepthFormat(desc.Format) && ((u32(desc.SurfaceInfo) >> 16) & 3) == 0 &&
+         width * 2 <= GuestScreenWidth() && height * 2 <= kGuestScreenHeight &&
+         GpuColorFormat((u32(desc.ColorInfo) >> 16) & 0xF) == GpuColorFormat::Fmt8_8_8_8;
+}
+
+// The options as LatchGraphicsOptionsLocked last read them: the draw path
+// asks for every target and sampler of every draw, too often for the
+// settings' strings.
+struct Latched {
+  bool shadow_follows_resolution = true;
+  RenderScale shadow_scale;
+  bool full_ambient_occlusion = false;
+  uint32_t min_anisotropy = 1;
+  bool high_precision_post = true;
+};
+Latched g_latched;
+
+} // namespace
+
+void LatchGraphicsOptionsLocked() {
+  const std::string &shadows = REXCVAR_GET(renut_shadow_resolution);
+  g_latched.shadow_follows_resolution = shadows == "Resolution" || shadows.empty();
+  g_latched.shadow_scale = {};
+  if (!g_latched.shadow_follows_resolution)
+    RenderScale::FromRatio(uint32_t(std::atoi(shadows.c_str())), 1, g_latched.shadow_scale);
+  g_latched.full_ambient_occlusion = REXCVAR_GET(renut_ambient_occlusion) == "Full";
+  // banjo-nx (2026-10-18): deko3d draws every target at the console's scale (its shaders are made for 1x, pass scale1
+  // of tools/deko3d_glsl_opt.py): shadow maps follow the resolution (1x) and the ambient occlusion is the game's.
+  // sa2-nx (1.0.3.1): kept: on deko3d the shadow maps follow the render resolution (1.5x at 1080p docked, with the
+  // package made without scale1) and the ambient occlusion is the game's, SA2's defaults on every back end.
+  if (IsDeko3D()) {
+    g_latched.shadow_follows_resolution = true;
+    g_latched.shadow_scale = {};
+    g_latched.full_ambient_occlusion = false;
+  }
+  const int anisotropy = std::atoi(REXCVAR_GET(renut_anisotropic_filtering).c_str());
+  g_latched.min_anisotropy = anisotropy >= 2 ? uint32_t(anisotropy) : 1;
+  g_latched.high_precision_post = REXCVAR_GET(renut_post_process_precision) != "Game";
+}
+
+// Dishonored (2026-11-09): the A/B rotation (dishonored_src/dh_ab_cycle.cpp, "unscaled") turns the rule off for a slot.
+bool (*g_unscaled_ab_off)() = nullptr;
+
+RenderScale SurfaceRenderScale(const d3d::SurfaceDesc &desc, RenderScale resolution) {
+  // MGR: no evidence identifies N&B's SSAO EDRAM base 1864, its shadow-map
+  // dimensions or its post-process targets in this game. Preserve the guest
+  // targets' relative sizes instead of applying another game's heuristics.
+  // Dishonored (2026-11-09, renut_unscaled_max_size): a target this small in both directions stays at 1x. UE3 renders
+  // its colour-grading LUT into a 32x16 target and resolves it into the volume texture the final pass looks colours up
+  // in; at 360p (0.5x) it came out 16x8 and the lookups read the wrong cells: the 3D picture tinted yellow / green on
+  // the Switch (the PC renders at 1x). Scaling such targets saves nothing.
+  static const bool shadow_unscaled = REXCVAR_GET(renut_shadow_unscaled);
+  if (shadow_unscaled && d3d::IsDepthFormat(desc.Format) && d3d::SurfaceWidth(u32(desc.Size)) >= 256 &&
+      d3d::SurfaceWidth(u32(desc.Size)) == d3d::SurfaceHeight(u32(desc.Size)))
+    return RenderScale{};
+  static const int32_t unscaled = REXCVAR_GET(renut_unscaled_max_size);
+  if (unscaled > 0 && !(g_unscaled_ab_off && g_unscaled_ab_off()) && d3d::SurfaceWidth(u32(desc.Size)) <= u32(unscaled) &&
+      d3d::SurfaceHeight(u32(desc.Size)) <= u32(unscaled))
+    return RenderScale{};
+  return resolution;
+}
+
+plume::RenderFormat SurfaceColorFormat(const d3d::SurfaceDesc &desc) {
+  // MGR's format is the one in its resource header. N&B's size-based format
+  // override is not justified for MGR's post effects.
+  return ColorTargetFormat(GpuColorFormat((u32(desc.ColorInfo) >> 16) & 0xF));
+}
+
+uint32_t MinAnisotropy() {
+  return g_latched.min_anisotropy;
+}
+
+} // namespace renut::gpu

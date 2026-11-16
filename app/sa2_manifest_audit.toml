@@ -1,0 +1,15 @@
+# ReXGlue recompilation manifest for Dishonored (Xbox 360, title 425307E3, default.xex + title update default.xexp).
+#
+# The project keeps the name "sa2" (the prefix of the generated files), inherited from Lazarus / mgr-nx-deko: the
+# CMake files and the renderer read those names.
+
+[project]
+name = "sa2"
+sdk_version = "0.10.0"
+game_root = "../assets/game_root"
+
+[entrypoint]
+file_path = "../assets/game_root/default.xex"
+out_directory_path = "generated_audit/default"
+
+includes = ["overrides.toml", "codegen_flavor_audit.toml"]

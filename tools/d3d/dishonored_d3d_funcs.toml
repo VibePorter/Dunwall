@@ -1,0 +1,39 @@
+# Dishonored (XDK 2.0.21076, TU 0.0.3.17) Direct3D functions for Renut, matched against ME2-TU2 (tools/d3d_match.py)
+# and verified on 2026-11-08: score 1.00 / caller agreement, or the evidence noted. Device layout = SA2/MGR
+# (CreateDevice: li r5,24704; thread id 11016; side buffer 17136).
+
+0x82B00738 = { name = "AllocateInlineData" }  # ME2 0x82A9FFC0; match 1.00
+0x82B00140 = { name = "BeginRingBig" }  # ME2 0x82A9F9E8; match 1.00
+0x82B01830 = { name = "BlockOnFence" }  # ME2 0x82AA0CA8; match 1.00
+0x82B05FC8 = { name = "CBlocker_Check" }  # ME2 0x82A8F9C8; match 1.00
+0x82AFCC48 = { name = "D3DDevice_BeginIndexedVertices" }  # ME2 0x82A9EAB8; match 0.96
+0x82B0B3F8 = { name = "D3DDevice_BeginTiling" }  # ME2 0x82AA4398; match 0.99
+0x82AFC740 = { name = "D3DDevice_BeginVertices" }  # ME2 0x82A9E5D8; match 0.86
+0x82B099D8 = { name = "D3DDevice_ClearF" }  # ME2 0x82AA2B30; match 0.82; BeginTiling calls it in ME2's slot
+0x82AFD5A0 = { name = "D3DDevice_DrawIndexedVertices" }  # ME2 0x82A9F3C0; match 0.95
+0x82AFD188 = { name = "D3DDevice_DrawVertices" }  # ME2 0x82A9EFD0; match 0.95
+0x82B0A120 = { name = "D3DDevice_Resolve" }  # ME2 0x82AA31F8; match 0.67; game present 82776FB0: Sync -> Resolve -> Swap; tiling fn calls it 4x before EndTiling; li r10,8984
+0x82B03228 = { name = "D3DDevice_Swap" }  # ME2 0x82AA5238; match 0.66; stw 11056 (ME2 10928 +128), flags2 11069 |= 0x10; present-interval sync via helpers 82B02920/82B02868
+0x82AF7010 = { name = "D3DResource_Destroy" }  # ME2 0x82A8E7A0; match 0.61; first 67 ins identical shape, same multi-path BlockOnFence exits
+0x82B05D78 = { name = "D3DVertexShader_Bind" }  # ME2 0x82AA7D78; match 0.91
+0x82AF84F8 = { name = "DefaultViewport" }  # ME2 0x82A9B0F0; match 1.00
+0x82B0E060 = { name = "DeferredWorkQueue" }  # ME2 0x82AAAD90; match 0.32; hardware init sub_82B135B8: same call slot (new call 82B06218 before it in XDK 21076)
+0x82B063C8 = { name = "Direct3D_CreateDevice" }  # ME2 0x82A8FC18; match 1.00
+0x82B0B750 = { name = "EndTiling" }  # ME2 0x82AA46F0; match 1.00
+0x82B060A0 = { name = "HardwarePM4Snippets" }  # ME2 0x82A8FAA0; match 1.00
+0x82B12AA0 = { name = "InitializeApiState" }  # ME2 0x82AA82E8; match 0.70; hardware init sub_82B135B8: same call slot
+0x82B12D80 = { name = "InitializePresentationParameters" }  # ME2 0x82AA85C8; match 0.66; hardware init sub_82B135B8: same call slot
+0x82B01D28 = { name = "IsFencePending" }  # ME2 0x82AA10D8; match 1.00
+0x82B01730 = { name = "KickOff" }  # ME2 0x82AA0BA8; match 1.00
+0x82B012F0 = { name = "KickOffSegment" }  # ME2 0x82AA0950; match 1.00
+0x82B008D8 = { name = "NewSegment" }  # ME2 0x82AA0160; match 0.89
+0x82B00508 = { name = "RingBufferDeviceAllocate" }  # ME2 0x82A9FD90; match 1.00
+0x82B01928 = { name = "RingCallback" }  # ME2 0x82AA0DA0; MATCHER WRONG (was sub_82AF8360); callers: EndTiling + 1 other call it in ME2's slots; same prologue (5 saved args, rlwinm r5,8,26,31)
+0x82B01DB8 = { name = "SetRingBufferParameters" }  # ME2 0x82AA1168; match 0.93
+0x82AFBD68 = { name = "ShaderGprBuffers" }  # ME2 0x82A92AC0; match 1.00
+0x82B024E0 = { name = "SynchronizeToPresentationInterval" }  # ME2 0x82AA4D00; match 0.97
+0x82AFC568 = { name = "VertexDeclaration_Init" }  # ME2 0x82A93650; match 1.00
+0x82AF86B0 = { name = "WindowScissor" }  # ME2 0x82A9B2A8; match 0.94
+0x82AFC0A8 = { name = "XGRegisterPixelShader" }  # ME2 0x82A92FB0; match 1.00
+0x82AFC2A0 = { name = "XGRegisterVertexShader" }  # ME2 0x82A93298; match 1.00
+0x82B181C0 = { name = "XenonGpu_Initialize" }  # ME2 0x82AAB0E0; match 0.93

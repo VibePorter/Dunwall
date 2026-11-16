@@ -1,0 +1,205 @@
+# Dishonored Renut/deko3d Switch settings (sdmc:/switch/dishonored/dishonored.toml). Paths without "sdmc:" (newlib's
+# default device). Based on ME2's app/me2_deko_switch.toml, without its game-specific switches.
+sa2_renderer = "renut"
+renut_gpu_backend = "deko3d"
+license_mask = 0xFFFFFFFF
+input_xbox_layout = true
+# Game language: auto (English; Russian when the Switch is set to Russian), english, russian, polish, czech,
+# hungarian, or disc (this Eastern European disc's own choice, always Russian).
+dh_language = "auto"
+
+# Game data: game_root.nxpack/.nxidx (tools/build_asset_pack.py) beside the NRO; the game_root folder itself is not
+# needed. The title update (DishonoredGame + default.xexp) in update/, the DLC packages in dlc/ (found by default).
+game_data_root = "/switch/dishonored/game_root"
+update_data_root = "/switch/dishonored/update"
+# DLC: dlc/<package>.nxpack + .nxidx (or extracted package folders). Named here because under Ryujinx the NRO has no
+# path, so "next to the NRO" cannot be found there.
+sa2_dlc_dir = "/switch/dishonored/dlc"
+
+# 2026-11-10: 480p (853x480, Renut scale 2/3) in both modes, up from 360p (1.78x the pixels; the HUD stays at 720p),
+# was GPU-bound in handheld mode (console log 19328f35: 41-48 ms of GPU a frame at 18-21 fps where 360p took 24-27 ms):
+# handheld back to 360p (GPU 460 MHz); docked (768 MHz) stays at 480p. Renut takes 360, 480, 540, 720.
+# 2026-11-13 (user): handheld 480p again. Since 11-10 the GPU work dropped ~30 % (alpha spec, prepass skip, culling):
+# 360p handheld now 17.6 ms median / 21.8 p90 / 26.9 worst GPU a frame at ~25 fps (40 ms frames, CPU-bound).
+# Expected at 480p: ~30 ms median (still under the frame), heavy spots ~35-45 ms (GPU-bound there: ~20-22 fps).
+# Back to 360 if the heavy spots drop too much.
+sa2_render_height_handheld = 480
+# 2026-11-14 (user): docked 540p (960x540, Renut scale 3/4: 1.27x the pixels of 480p) on the docked GPU clock
+# (768 MHz vs 460 handheld). Back to 480 if the heavy spots become GPU-bound on the TV.
+sa2_render_height_docked = 540
+# 2026-11-10: store cards on (banjo_renut_store_cards default; PC verify: 0 copies changed under clean cards).
+# 2026-11-12 (rainbow / black textures at a distance): a session with
+# banjo_renut_store_cards_verify = true (artefact seen again at 08:39) logged 0 copies / textures changed under clean
+# cards in 89 reports: the cards miss no writer. (That verify compares the same sampled hash the cards stand in for, so
+# it says nothing of bytes SampleHash does not read: see dh_renut_texture_full_verify.) Off again.
+banjo_renut_store_cards_verify = false
+# 2026-11-12: UE3 copies texture memory with the GPU (FMemCopyVertexShader, memexport). A fence completes before the
+# GPU runs, and the export reaches guest memory a frame or more later; CPU writes in between were overwritten. Now
+# logged as "[export-late]" (with the textures over the CPU's writes) and merged, the CPU's words kept; the
+# "[export] 10 s" line counts the write-backs. (Default on; false = the old overwrite, still logged.)
+dh_renut_export_merge = true
+# 2026-11-14 (user: dips while walking through a level): a texture the game binds for the first time was converted
+# and uploaded whole, every level, on the render thread inside that frame: 150-290 ms frames when an area streams in
+# (PGO run 2026-11-13, "[tex-stream] ... worst frame"). With a budget a large new texture (256 KB or more) gets its
+# small levels at once and its large ones over the next frames, at most this much staging a frame, smallest first
+# (it looks soft for a few frames, as UE3's own streaming does). 0 = whole textures at once.
+me2_renut_upload_budget_kb = 4096
+# 2026-11-10: the alpha test's function as part of the pipeline (deko3d specialization constant 903): an opaque draw's
+# pixel shader has no alpha compare and no discard, so Maxwell tests depth before shading (early-Z / ZCULL; naruto-nx's
+# largest GPU saving). Was off, inherited from ME2 (an SA2 texture bug seen only in Ryujinx). Its pipeline variants are
+# compiled by the console as they come (uam, core 3; appended to deko3d_shaders.bin on the SD card): expect some
+# stutter in the first run through a level, then regenerate the cache from the console's pipeline list
+# (tools/deko3d_variant_cache.py) so a fresh install has them. Off: as before.
+banjo_deko3d_alpha_spec = true
+# 2026-11-10 (from naruto-nx 7509546): the render queue as a lock-free ring, identical whole clears not sent, and a chain
+# draw that changed only its geometry on the fast path. All on by default; each can be turned off for an A/B:
+# sa2_renut_lockfree_queue = false
+# sa2_renut_clear_repeat = false
+# dh_renut_draw_fastpath = false
+# 2026-11-10 (naruto-nx's setting): a contended critical section initialised without a spin count is tried this many
+# times (a CPU yield between tries, ~2-4 us) before the full host waiter (object lookup, condition variable, a context
+# switch each way). The console profile shows almost no host waits, so this mostly guards the odd one. 0 = no spin.
+kernel_critsec_spin = 150
+
+# 2026-11-13 (user): no ImGui in game: the debug overlay, settings menu, log console (L+R + d-pad) and the achievement
+# overlay / toasts are off (as ME2's release). true brings them back.
+# 2026-11-14 (user): back on for the debug overlay's FPS counter (L+R + d-pad up).
+ui_dev_overlays = true
+
+user_data_root = "/switch/dishonored/userdata"
+log_file = "/switch/dishonored/dishonored.log"
+log_level = "info"
+log_async = true
+log_flush_interval = 2
+
+# 2026-11-10: switch_audio_core_mask = 0x4 (audio on core 2 only) starved the pipeline prebuild worker on core 2 (the
+# render thread waited for it: 4-7 fps for minutes) and dropped sound: back to the default (cores 1-2).
+# 2026-11-10 (later): the audio threads (Wwise's AK::EventManager, the Audio Worker, audio output; XMA is on core 3
+# already) on cores 2-3, preferring core 2: the default 0x6 put Wwise (33-39 % of a core in heavy scenes) on core 1 next
+# to Renut's render thread (core 1 at ~94 %). The prebuild worker is on core 3 now (banjo_background_compile_core), so
+# the earlier starvation on core 2 does not apply, and core 3 is there for the audio when the game thread fills core 2.
+# Watch the "audio gaps" line of logs/rex/rex_profile.log; 0x6 brings the default back.
+switch_audio_core_mask = 0xC
+# 2026-11-10: the background compile threads (uam shader compiles, pipeline prewarm / prebuild, shader preparation,
+# ring cleaner) on core 3 instead of core 2, which the game thread uses (console profile: core 3 had XMA 6 % and the
+# occlusion rasterizer 18 %). Needs the forwarder (core 3); back to 2 if the occlusion pops come back.
+banjo_background_compile_core = 3
+
+# 2026-11-10: the software occlusion rasterizer (dishonored_src/dh_occlusion_raster.cpp) answers UE3's occlusion queries
+# from the frame's own occluders (no stale GPU counts or history: no characters popping out). PC compare: 93-97 % agree
+# with the GPU counts, 0 false hidden. 1 = compare only (logged, the old answers kept), 0 = off.
+dh_raster_mode = 2
+
+# UE3 streams 128 KB chunks; admit them to the bounded read-only range cache.
+sa2_io_ranges_min_kb = 128
+
+# logs/rex/rex_profile.log every 10 s (per-thread CPU, cores, audio counters).
+switch_profile_report = true
+# Profiling run (2026-11-10: watch, store cards, natives): CPU stack samples of the 4 busiest threads (costs a few
+# fps). Remove these two lines for normal play.
+switch_profile_stacks = true
+switch_profile_stacks_top = 6
+
+# Render-thread draw stages ("[draw-stages]" every 10 s), to pick work for another core. Remove afterwards.
+renut_draw_stage_timing = true
+# 2026-11-10 diagnostic for the draw fast path (0 hits in the first run): which device chunks change between consecutive
+# draws ("[delta-tags] chunk N (+offset): N changes" every 60 s). Remove afterwards.
+# me2_diag_delta_tags = true   (2026-11-11: off, its report every 60 s cost ~1 s of frames; data taken)
+# 2026-11-11 (user: balance of picture and performance, to be adjusted): tighter size-based draw distance of small
+# static meshes (defaults 100 x radius, at least 2000 units: only 0.5 % of the elements culled where the console stood
+# at 23 fps). Cuts the prepass and base pass draws alike. Back to the defaults: remove both lines.
+# 2026-11-12 (user: perf item 3): tighter again, 70 / 1200 -> 50 / 900. At the heavy spots ~650 of ~760 draws a frame
+# are opaque base-pass draws (shadow depth draws are already ~11 with dh_prepass_no_dominant_shadows), so the draw count
+# is what is left to cut. Pop-in of small props: back to 70 / 1200. Measured by the A/B slot small_mesh below.
+dh_cull_small_factor = 50
+dh_cull_small_min_distance = 900
+# 2026-11-11 (user): UE3's world depth prepass is not drawn (about a fifth of the draws and ~11 % of UE3's render
+# thread; the GPU loses early depth rejection: watch "GPU .. ms a frame" in the [renut] lines). "[prepass]" every
+# 10 s. Needs the NRO built on 2026-11-11 or later. Off: remove the line.
+dh_prepass_skip = true
+# 2026-11-11 evening: the prepass was never skipped in the heavy spots (a dominant light's dynamic shadows are projected
+# from its depth before the base pass). With this they are not drawn (the sun's shadows of characters / movable
+# objects; baked shadows stay) and the skip applies everywhere. Picture not acceptable: remove this line.
+dh_prepass_no_dominant_shadows = true
+# 2026-11-11 (user): static meshes pick LOD and draw distance as if 1.25 x farther away (1 = the game's own).
+# A/B 2026-11-11 (04:20-04:28, 24 fps spot): no change in draws (789 vs 787 a frame) or fps with it off; untested at
+# the heavier 20 fps spot. 1.0 gives the game's own look back at no measured cost here.
+dh_lod_distance_scale = 1.25
+# 2026-11-11 (user): fewer wakes of Renut's render thread paid by UE3's thread (~2-3 % of core 0 where Renut's thread
+# has headroom): it is woken once 64 draws are queued (default 16; a 2 ms timer wakes it anyway).
+sa2_renut_wake_batch = 64
+# 2026-11-11 A/B (console, 04:20-04:28, stationary): polling the queue for 150 us before sleeping (ring spin) cost
+# 0.5-1 fps in every one of 8 paired slots (24.3 fps off vs 23.4 on; the poll reads the slot UE3's thread on core 0
+# writes). Off. The A/B slot "ring_spin" stays available.
+sa2_renut_ring_spin_us = 0
+# 2026-11-11 (user): every primitive that passes UE3's own visibility tests is checked against the rasterizer's depth
+# buffer of the frame before; hidden ones are left out of every pass. 1 = count only, 2 = only the classes UE3 never
+# queries, 3 = every hidden primitive. "[dh-raster] primitives" every 10 s. Popping objects: try 2, 1 or remove.
+dh_raster_prims = 3
+# 2026-11-11 (user): the game's own quality settings ([SystemSettings] of the Xbox 360 engine ini), replaced as it loads
+# them ("[settings]" lines at start). The 360 runs DetailMode=2 with every shadow kind on.
+#   bAllowWholeSceneDominantShadows=False  no dynamic sun shadow pass; it also forced the full depth prepass (console
+#                                          2026-11-11: 45 % of the draws at a 20 fps spot, never skipped) -> dh_prepass_skip
+#   DetailMode=1                           objects flagged as high detail only are not drawn
+#   DecalCullDistanceScale=0.5             decals go at half the distance
+#   ParticleLODBias=1                      particle systems one LOD simpler
+# Remove a key to get the game's own value back.
+# (bAllowWholeSceneDominantShadows=False taken out again 2026-11-11: no effect on the prepass or the draw count)
+dh_system_settings = "DetailMode=1,DecalCullDistanceScale=0.5,ParticleLODBias=1"
+# 2026-11-11: game config values (Coalesced_*.bin) replaced as the game reads them, "Section:Key=Value|..." ("[ini]"
+# lines at start show the game's own value). The stationary dips (one 730-770 ms frame every 60-70 s) look like
+# UE3's garbage collection; Dishonored's [Engine.Engine] runs it after 16384 object allocations or 1 MB allocated
+# (NumberOfAllocsBetweenGC / TotalAllocSizeBetweenGC; the 300 s timer TimeBetweenPurgingPendingKillObjects is not
+# what fires every minute). Both limits 4 x: a dip about every 4-5 min instead, a few MB more held between
+# collections. Remove the line for the game's own values.
+dh_ini_override = "Engine.Engine:NumberOfAllocsBetweenGC=65536|Engine.Engine:TotalAllocSizeBetweenGC=4194304"
+# A/B rotation (one stationary test run, then remove): dh_ab_cycle = "raster_prims,lod_scale,ring_spin" turns each
+# feature off in turn for 10 s ("[ab]" lines each second with frames and draws; scratchpad ab.py sums them).
+# 2026-11-11 run (04:20-04:28): raster_prims off = +28 % draws, -1.3 fps (kept on); lod_scale off = no change in
+# draws or fps at that spot; ring_spin off = +0.5-1 fps (now off).
+# 2026-11-12: ON for one run: the tighter small-mesh cull (small_mesh off = no size cull at all) and raster_prims
+# against everything on. Stand still a few minutes in a heavy spot, then remove this line.
+# 2026-11-13: off while PGO is collected (the profile should see the normal settings).
+# dh_ab_cycle = "small_mesh,raster_prims"
+# 2026-11-11: draw census for the core-0 (UE3 render thread) wall: every draw counted by its UE3 caller chain and kind
+# (depth / opaque / additive per-light / blend), "[draw-callers]" every 10 s. Callers are image offsets: resolve with
+# nm on out/deployments/<sha>/dishonored.elf. Remove afterwards.
+# 2026-11-12: off (NoteDrawCaller was 0.8 % of UE3's render thread in slow frames; the [ab] lines count draws).
+# me2_diag_draw_callers = true
+
+# Saves in the console's per-user save data when started from the HOME-menu forwarder
+# (tools/nx/build_dishonored_forwarder.sh, title ID 0144534844000000); from hbmenu they stay on the SD card.
+me2_switch_save_title_id = "0144534844000000"
+
+# (2026-11-12: dh_shader_trace removed: the "runtime" shaders were cache chunks the extractor dropped; all are in
+# the shader table now.)
+
+# 2026-11-12: Horizon's CPU boost mode (1785 MHz instead of 1020; the GPU at its minimum) while the game loads: frames
+# with at most dh_load_boost_draws draws (the loading screen draws ~6), or no frame for dh_load_boost_stall_ms. Loads are
+# CPU-bound (the game thread at 84 % of a core). Only from the HOME menu forwarder (an application); "[load-boost]"
+# lines give each boost's length. 2026-11-12: the user does not want it: off.
+dh_load_boost = false
+
+# 2026-11-12 (perf item 2): the self-checked natives (dh_hot*.cpp) check their first 256 calls each run, then 1 in
+# 4096 by default. A check copies the native's declared write ranges into a new buffer (malloc under newlib's one
+# global lock): ~1 % of UE3's render thread in slow frames (stacks of NRO b4563e94), for the shader parameter setters.
+# Every guard has reported OK since 2026-11-10. 1 in a million afterwards; remove the line for the default.
+me2_hot_guard_period = 1048576
+
+# 2026-11-13: the level-load "GPU timeout" crash (0xD5C) was the GPU's 2048-entry command ring running full while the
+# CPU was far ahead; the SDK now retries the submit (deko3d.log: "gpu channel: the GPU's command ring was full ...").
+# Confirmed by the user (NRO e4cc9204). Breadcrumbs (dh_gpu_breadcrumbs) off again; set it true to diagnose a GPU hang.
+
+# 2026-11-13 (the rainbow textures that stay until a level reload): in all four rainbow sessions the GPU went under the
+# 192 MB texture reserve a few minutes in, the colour resolve pool stopped, and the UI's resolve destination (flipping
+# 0.5x <-> 1x twice a frame) was freed and made again ~50 times a second. The pool now stops only under 32 MB left
+# (NRO 01aa268c). For an A/B with the old behaviour: dh_resolve_pool_floor_mb = 192
+# 2026-11-13 (churn gone, rainbow still there): a diagnostic run (re-upload every 300 frames + whole guest checks, 27
+# min) showed the game's memory always right (0 changes unseen in 106,961 checks): the damage was to the GPU's copy
+# after a correct upload. The fix: render targets (hardware-compressed images) get their own GPU memory chunks, never
+# shared with textures (plume_deko3d.cpp imageAlloc). No periodic re-upload; the diagnostics are off.
+# 2026-11-13 night (rainbow still there with the render-target chunks: Havelock at 10 m, 06:02): the texture's staging
+# bytes could reach the GPU's copy before they had left the CPU's cache (a command list that ended at a kick with no new
+# upload bytes was submitted without waiting for the ring cleaner's earlier ranges), so the image got the upload ring's
+# old bytes. Fixed in the NRO: such a list waits ("[ring] a list of N draws ended at a kick ..." in the log counts
+# them), and every texture level is cleaned by the render thread as it is written. No setting.
