@@ -77,7 +77,7 @@ class PackFile : public File {
   X_STATUS ReadSyncPack(std::span<uint8_t> buffer, size_t byte_offset, size_t* out_bytes_read);
 
   PackEntry* pack_entry_;
-  uint32_t readahead_id_ = 0;  // "pack:" + path, the range cache's id (0 = not asked yet)
+  uint32_t readahead_id_ = 0;  // range_key(), the range cache's id (0 = not asked yet)
   // Small reads (<= half the window) are served from a window of the file, as asset_pack.c does per handle.
   std::mutex cache_mutex_;
   std::vector<uint8_t> cache_;
@@ -116,10 +116,15 @@ class PackDevice : public Device {
 
   PackStorage* storage() const { return storage_.get(); }
   size_t entry_count() const { return entry_count_; }
+  // Dishonored (2026-11-21): the range cache's name of one of this pack's files: "pack:" + the pack file + "|" +
+  // the entry's path. The path alone was the same in two packs of one folder layout (a voice overlay pack over the
+  // game pack), so their reads would have shared cached ranges.
+  std::string range_key(const std::string& entry_path) const { return range_key_prefix_ + entry_path; }
 
  private:
   std::string name_ = "PACK";
   std::filesystem::path folder_;
+  std::string range_key_prefix_;
   std::unique_ptr<PackStorage> storage_;
   std::unique_ptr<PackEntry> root_entry_;
   size_t entry_count_ = 0;

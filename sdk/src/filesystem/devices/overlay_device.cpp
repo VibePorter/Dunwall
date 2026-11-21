@@ -4,6 +4,10 @@
 
 #include <rex/filesystem/devices/overlay_device.h>
 
+#include <system_error>
+
+#include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/devices/pack_device.h>
 #include <rex/filesystem/entry.h>
 #include <rex/logging.h>
 #include <rex/string/utf8.h>
@@ -41,6 +45,30 @@ OverlayDevice::OverlayDevice(std::unique_ptr<Device> base, std::unique_ptr<Devic
     : Device(base->mount_path()), base_(std::move(base)), overlay_(std::move(overlay)) {}
 
 OverlayDevice::~OverlayDevice() = default;
+
+std::unique_ptr<Device> OverlayDevice::OpenSource(const std::string_view mount_path, const std::filesystem::path& root,
+                                                  bool allow_pack, std::string* what) {
+  if (allow_pack && PackDevice::Exists(root)) {
+    auto pack = std::make_unique<PackDevice>(mount_path, root);
+    if (pack->Initialize()) {
+      if (what) *what = rex::path_to_utf8(PackDevice::PackPath(root)) + " (asset pack)";
+      return pack;
+    }
+    REXFS_WARN("[overlay] the asset pack {} is unusable: trying the folder", rex::path_to_utf8(PackDevice::PackPath(root)));
+  }
+  std::error_code ec;
+  if (!std::filesystem::is_directory(root, ec)) {
+    if (what) *what = rex::path_to_utf8(root) + " is neither a folder nor an asset pack";
+    return nullptr;
+  }
+  auto folder = std::make_unique<HostPathDevice>(mount_path, root, /*read_only=*/true);
+  if (!folder->Initialize()) {
+    if (what) *what = rex::path_to_utf8(root) + " could not be read";
+    return nullptr;
+  }
+  if (what) *what = rex::path_to_utf8(root);
+  return folder;
+}
 
 // Both devices are initialized by the caller. Each overlay file goes into the base's directory of the same path: it
 // replaces a base file of that name (kept alive, unused: other code may still hold it) or is added. A directory only

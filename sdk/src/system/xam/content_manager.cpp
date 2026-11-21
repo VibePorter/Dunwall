@@ -19,6 +19,7 @@
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/devices/overlay_device.h>
 #include <rex/filesystem/devices/pack_device.h>
 #include <rex/filesystem/devices/stfs_container_device.h>
 #include <rex/logging.h>
@@ -55,6 +56,12 @@ REXCVAR_DEFINE_BOOL(content_marketplace_read_only, true, "Kernel",
                     "Marketplace content (DLC) packages are mounted read-only, with a cached index of their files "
                     "(faster mounts). false = read-write and a full folder scan at every mount, as before")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+// Dishonored (2026-11-21): DLC packages with files laid over them, as game_overlay_root does for the game data
+// (filesystem/devices/overlay_device.h): <dlc_overlay_root>/<package name> (a folder, or its asset pack <package
+// name>.nxpack + .nxidx) over that package. Dishonored: the Russian voice banks of DLC06 and DLC07.
+REXCVAR_DEFINE_STRING(dlc_overlay_root, "", "Kernel",
+                      "Folder of per-DLC overlays: <folder>/<package name> (or its .nxpack + .nxidx) is laid over "
+                      "that DLC package, its files replacing the package's; empty = none");
 REXCVAR_DEFINE_STRING(content_backup_root, "", "Kernel",
                       "Folder where a copy of each save is left, with one subfolder per profile. "
                       "Empty = nothing is copied");
@@ -227,36 +234,55 @@ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view
   // me2-nx-deko (2026-11-06, content_marketplace_read_only): DLC read-only, with its own tree index.
   const bool marketplace = static_cast<uint32_t>(data.content_type.get()) == 2u;
   const bool read_only = marketplace && REXCVAR_GET(content_marketplace_read_only);
+  std::unique_ptr<rex::filesystem::Device> base;
   if (marketplace && IsPackOnly(package_path)) {
     // DLC as an asset pack (dlc/<name>.nxpack + .nxidx): read-only by nature, its index is the .nxidx.
     auto pack = std::make_unique<rex::filesystem::PackDevice>(device_path_, package_path);
     if (pack->Initialize()) {
       REXSYS_INFO("[dlc] '{}' mounted from its asset pack ({} entries)", data.file_name(), pack->entry_count());
-      fs->RegisterDevice(std::move(pack));
-      fs->RegisterSymbolicLink(root_name_ + ":", device_path_);
-      return;
-    }
-    REXSYS_WARN("[dlc] the asset pack of '{}' is unusable: {}", data.file_name(),
-                rex::path_to_utf8(rex::filesystem::PackDevice::PackPath(package_path)));
-  }
-  auto device = std::make_unique<rex::filesystem::HostPathDevice>(device_path_, package_path, read_only,
-                                                                  /*allow_share_delete=*/true);
-  if (read_only) {
-    // package_path = <content root>/<xuid>/<title>/<type>/<name>
-    std::filesystem::path root = package_path;
-    if (!root.has_filename()) root = root.parent_path();
-    const std::string name = rex::path_to_utf8(root.filename());
-    const auto& extracted = kernel_state_->content_manager()->extracted_marketplace_dir();
-    if (!extracted.empty() && root.parent_path() == extracted) {
-      // <base>/dlc/<name>: the index goes to <base>/cache like the store's (<base>/<user data>/x/t/2/<name>).
-      root = extracted;
+      base = std::move(pack);
     } else {
-      for (int i = 0; i < 4 && root.has_parent_path(); ++i) root = root.parent_path();
+      REXSYS_WARN("[dlc] the asset pack of '{}' is unusable: {}", data.file_name(),
+                  rex::path_to_utf8(rex::filesystem::PackDevice::PackPath(package_path)));
     }
-    device->SetIndexPath(root.parent_path() / "cache" / rex::to_path("vfs_index_dlc_" + name + ".bin"));
   }
-  device->Initialize();
-  fs->RegisterDevice(std::move(device));
+  // package_path = <content root>/<xuid>/<title>/<type>/<name>, or <base>/dlc/<name>
+  std::filesystem::path root = package_path;
+  if (!root.has_filename()) root = root.parent_path();
+  const std::string name = rex::path_to_utf8(root.filename());
+  if (!base) {
+    auto device = std::make_unique<rex::filesystem::HostPathDevice>(device_path_, package_path, read_only,
+                                                                    /*allow_share_delete=*/true);
+    if (read_only) {
+      const auto& extracted = kernel_state_->content_manager()->extracted_marketplace_dir();
+      if (!extracted.empty() && root.parent_path() == extracted) {
+        // <base>/dlc/<name>: the index goes to <base>/cache like the store's (<base>/<user data>/x/t/2/<name>).
+        root = extracted;
+      } else {
+        for (int i = 0; i < 4 && root.has_parent_path(); ++i) root = root.parent_path();
+      }
+      device->SetIndexPath(root.parent_path() / "cache" / rex::to_path("vfs_index_dlc_" + name + ".bin"));
+    }
+    device->Initialize();
+    base = std::move(device);
+  }
+  // dlc_overlay_root: <it>/<package name> over the package, when there is one for it.
+  if (std::string overlay_root = REXCVAR_GET(dlc_overlay_root); marketplace && !overlay_root.empty()) {
+    std::erase(overlay_root, '"');  // string cvars can come back quoted
+    const auto source = std::filesystem::absolute(rex::to_path(overlay_root)) / rex::to_path(name);
+    std::error_code ec;
+    if (std::filesystem::is_directory(source, ec) || rex::filesystem::PackDevice::Exists(source)) {
+      std::string what;
+      if (auto overlay = rex::filesystem::OverlayDevice::OpenSource(device_path_, source, true, &what)) {
+        base = std::make_unique<rex::filesystem::OverlayDevice>(std::move(base), std::move(overlay));
+        base->Initialize();  // the overlay's files into the package's directories
+        REXSYS_INFO("[dlc] '{}': {} laid over it", data.file_name(), what);
+      } else {
+        REXSYS_ERROR("[dlc] '{}': dlc_overlay_root: {}: the package alone", data.file_name(), what);
+      }
+    }
+  }
+  fs->RegisterDevice(std::move(base));
   fs->RegisterSymbolicLink(root_name_ + ":", device_path_);
 }
 

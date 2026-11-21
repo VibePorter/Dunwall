@@ -7,6 +7,24 @@ input_xbox_layout = true
 # Game language: auto (English; Russian when the Switch is set to Russian), english, russian, polish, czech,
 # hungarian, or disc (this Eastern European disc's own choice, always Russian).
 dh_language = "auto"
+# Voices: english (the disc's) or russian (the dub, game and DLC; needs voice_ru/ beside the NRO: game.nxpack/.nxidx
+# and dlc/<package>.nxpack/.nxidx, tools/build_voice_overlay.py). Independent of dh_language.
+dh_voice = "english"
+
+# Gyro aiming (the console's or controller's gyroscope adds to the right stick). Options -> Controls has rows for it;
+# what is chosen there is saved in userdata/dishonored_gyro.cfg and wins over these lines.
+# input_gyro: 0 = off, 1 = while the Power/Gadget button is held (ZL in Type A/C/E, L in Type B, R in Type D),
+# 2 = always. input_gyro_sensitivity 0.5 .. 10 (in game, L+R+X raises it and L+R+Y lowers it by 0.5).
+input_gyro = 1
+input_gyro_sensitivity = 3.0
+input_gyro_invert_x = true
+input_gyro_invert_y = true
+# FPS unlocker (from Lazarus): the game's 30 fps is its presentation interval only (UE3 allows up to 130).
+# me2_fps_limit: -1 = the game's own 30 fps (default), 0 = the display's refresh rate (60 on the Switch), N = at most
+# N fps. Read every frame. me2_unlock_framerate = true removes the cap altogether (read at startup).
+# me2_fps_limit = 60
+# me2_unlock_framerate = true
+# Ready-made settings: config/profiles/<language>/<Performance or Fidelity>/dishonored.toml (tools/make_profiles.py).
 
 # Game data: game_root.nxpack/.nxidx (tools/build_asset_pack.py) beside the NRO; the game_root folder itself is not
 # needed. The title update (DishonoredGame + default.xexp) in update/, the DLC packages in dlc/ (found by default).
@@ -44,6 +62,11 @@ dh_renut_export_merge = true
 # small levels at once and its large ones over the next frames, at most this much staging a frame, smallest first
 # (it looks soft for a few frames, as UE3's own streaming does). 0 = whole textures at once.
 me2_renut_upload_budget_kb = 4096
+# 2026-11-21 (from Lazarus): a command list's texture uploads go into one companion list submitted right before it,
+# with a single barrier (deko3d; "[uploads] 10 s" line), and the deferred vertex fills remember readable guest ranges
+# until memory is released ("[readable-memo] 10 s" line). false = as before.
+renut_batched_uploads = true
+renut_readable_memo = true
 # 2026-11-10: the alpha test's function as part of the pipeline (deko3d specialization constant 903): an opaque draw's
 # pixel shader has no alpha compare and no discard, so Maxwell tests depth before shading (early-Z / ZCULL; naruto-nx's
 # largest GPU saving). Was off, inherited from ME2 (an SA2 texture bug seen only in Ryujinx). Its pipeline variants are

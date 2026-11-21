@@ -152,6 +152,8 @@ extern "C" void DhPatchDecompressed(uint8_t* base, uint32_t dst, uint32_t size) 
 #include <rex/hook.h>
 #include <rex/ppc.h>
 
+#include "dh_gyro_menu.h"
+
 #include <vector>
 
 REXCVAR_DEFINE_BOOL(dh_hide_storage_device, true, "Dishonored",
@@ -246,11 +248,15 @@ void Restore(uint8_t* base, const Compacted& saved) {
 
 }  // namespace
 
+// 2026-11-21: the gyro rows are put in the same way (dh_gyro_menu.cpp), after the hidden ones are taken out.
 REX_HOOK_RAW(sub_829A4D70) {  // one subcategory
   Compacted settings;
   if (HideStorage())
     Compact(base, ctx.r4.u32 + kSubSettings, kSettingSize, [&](uint32_t s) { return !Hidden(base, s); }, settings);
+  dh::gyro_menu::Injected gyro;
+  dh::gyro_menu::Inject(ctx, base, ctx.r4.u32 + kSubSettings, gyro);
   __imp__sub_829A4D70(ctx, base);
+  dh::gyro_menu::Restore(base, gyro);
   Restore(base, settings);
 }
 
@@ -261,7 +267,10 @@ REX_HOOK_RAW(sub_829A4AC0) {  // one category
     Compact(base, cat + kCatSettings, kSettingSize, [&](uint32_t s) { return !Hidden(base, s); }, settings);
     Compact(base, cat + kCatSubs, kSubSize, [&](uint32_t sub) { return !SubGone(base, sub); }, subs);
   }
+  dh::gyro_menu::Injected gyro;
+  dh::gyro_menu::Inject(ctx, base, ctx.r4.u32 + kCatSettings, gyro);
   __imp__sub_829A4AC0(ctx, base);
+  dh::gyro_menu::Restore(base, gyro);
   Restore(base, subs);
   Restore(base, settings);
 }

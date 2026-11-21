@@ -28,6 +28,9 @@
 #include "me2_switch_save.h"
 #if defined(PORT_DISHONORED)
 #include "sa2_dlc.h"
+namespace dh::language {
+void ApplyVoice(const std::filesystem::path& game_data_root);  // dishonored_src/dh_language.cpp: dh_voice
+}
 #endif
 
 namespace me2::me1_import {
@@ -283,6 +286,10 @@ class Me2App : public rex::ReXApp {
            // the 360's A: confirm / use), X and Y stay by position. Only the game's input; the port's own menu keeps
            // input_xbox_layout. The on-screen legend still shows the 360's letters.
            "input_p1_a = \"A\"\ninput_p1_b = \"B\"\ninput_p2_a = \"A\"\ninput_p2_b = \"B\"\n"
+           // 2026-11-21 gyro aiming (SDK input_gyro, user request): on while the Power/Gadget button is held (it
+           // follows the control scheme, dh_gyro_menu.cpp), both axes inverted as ME2's (the user's choice there).
+           // Options -> Controls has rows for it; dishonored_gyro.cfg (what was chosen there) wins over these.
+           "input_gyro = 1\ninput_gyro_invert_x = true\ninput_gyro_invert_y = true\n"
            "sa2_render_height_handheld = 360\nsa2_render_height_docked = 360\n";
 #elif REX_PLATFORM_SWITCH
     // Performance baseline; explicit mgr.toml values still override these.
@@ -386,6 +393,10 @@ class Me2App : public rex::ReXApp {
   // Stage 4: with sa2_renderer_native = true the graphics system is the app's native Vulkan renderer (src/me), and the
   // emulated Xenos GPU plugin is not loaded (ReXApp only loads it when config.graphics is empty).
   void OnPreSetup(rex::RuntimeConfig& config) override {
+#if defined(PORT_DISHONORED)
+    // Dishonored (2026-11-21): dh_voice -> the voice overlays, before Runtime::Setup mounts the game data.
+    dh::language::ApplyVoice(game_data_root());
+#endif
 #if defined(MGR_RENUT_RENDERER) && !defined(MGR_NATIVE_RENDERER)
     // Handheld: the official GPU 460.8 MHz profile (+ memory 1600 with sa2_switch_ram_1600); sa2_gpu_boost.cpp.
     // Before 2026-10-26 the ME2 build never asked for it and the console ran its GPU at 307.2 MHz.

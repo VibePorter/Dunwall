@@ -42,8 +42,8 @@ REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data pat
 // read from it, everything else from the game folder or its asset pack. ME2: the Russian edition's five files that
 // differ (default.xex included: its resources are the edition's) over the English pack.
 REXCVAR_DEFINE_STRING(game_overlay_root, "", "Runtime",
-                      "Folder laid over the game data: its files replace the game's (e.g. another edition's); empty = "
-                      "none");
+                      "Folder (or its asset pack <folder>.nxpack + .nxidx) laid over the game data: its files replace "
+                      "the game's (e.g. another edition's, or Dishonored's Russian voice banks); empty = none");
 // me2-nx-deko-tu2 (2026-11-03): update: as a folder of the game data (pack and overlay included) instead of a
 // folder of its own, so a title update's files live in the asset pack and an edition's overlay (game_overlay_root)
 // can add its own to the same folder. ME2 Title Update 2: game/update/BioGame_Update_INT.tlk + _ESN in the pack,
@@ -390,19 +390,15 @@ bool Runtime::SetupVfs() {
   if (std::string overlay_root = REXCVAR_GET(game_overlay_root); !overlay_root.empty()) {
     std::erase(overlay_root, '"');  // string cvars can come back quoted
     const auto abs_overlay = std::filesystem::absolute(overlay_root);
-    if (!std::filesystem::is_directory(abs_overlay)) {
-      REXSYS_ERROR("Runtime::SetupVfs: game_overlay_root {} is not a folder: the game data alone",
-                   abs_overlay.string());
+    // Dishonored (2026-11-21): the overlay's asset pack (<overlay>.nxpack + .nxidx) when it has one, else the folder.
+    std::string what;
+    auto overlay = rex::filesystem::OverlayDevice::OpenSource(mount_path, abs_overlay, REXCVAR_GET(asset_pack), &what);
+    if (!overlay) {
+      REXSYS_ERROR("Runtime::SetupVfs: game_overlay_root: {}: the game data alone", what);
     } else {
-      auto overlay = std::make_unique<rex::filesystem::HostPathDevice>(mount_path, abs_overlay, true);
-      if (overlay->Initialize()) {
-        device = std::make_unique<rex::filesystem::OverlayDevice>(std::move(device), std::move(overlay));
-        device->Initialize();  // the overlay's files into the game's directories (listings too)
-        REXSYS_INFO("[overlay] game data: {} over {}", abs_overlay.string(), abs_game_root.string());
-      } else {
-        REXSYS_ERROR("Runtime::SetupVfs: game_overlay_root {} could not be read: the game data alone",
-                     abs_overlay.string());
-      }
+      device = std::make_unique<rex::filesystem::OverlayDevice>(std::move(device), std::move(overlay));
+      device->Initialize();  // the overlay's files into the game's directories (listings too)
+      REXSYS_INFO("[overlay] game data: {} over {}", what, abs_game_root.string());
     }
   }
   if (!file_system_->RegisterDevice(std::move(device))) {

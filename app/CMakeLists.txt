@@ -231,6 +231,7 @@ if(MGR_RENUT_RENDERER)
                 dishonored_src/dh_occlusion_raster.cpp  # 2026-11-10: software occlusion rasterizer (stage 1: structures)
                 dishonored_src/dh_button_icons.cpp  # 2026-11-10: Switch button prompts (tools/dh_button_icons.py)
                 dishonored_src/dh_control_scheme.cpp  # 2026-11-11: Options -> Control Scheme "Type E" (A and B swapped)
+                dishonored_src/dh_gyro_menu.cpp  # 2026-11-21: Options -> Controls gyro aiming rows (input_gyro*)
                 dishonored_src/dh_main_menu.cpp  # 2026-11-11: no DLC store button on the main menu
                 dishonored_src/dh_settings.cpp  # 2026-11-11: UE3 system settings from the toml (dh_system_settings)
                 dishonored_src/dh_ini_override.cpp  # 2026-11-11: game config values from the toml (dh_ini_override)

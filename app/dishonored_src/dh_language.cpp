@@ -6,14 +6,21 @@
 // in CookedXbox360\COOKEDLANGUAGES (RUS, CZE, HUN, POL); otherwise CookedXbox360\DEFAULTLANGUAGE (RUS) is used. So
 // English is never picked on its own. The hook lets the game choose, then replaces the three letters in the returned
 // FString and in the function's cached copy (FString at 0x83523858: data, count with the terminator, capacity).
-// The voice banks (Bk_<id>.RUS, English speech: the game has no Russian dub) are on the disc as .RUS only, so with
+// The voice banks (Bk_<id>.RUS, English speech: the disc has no Russian dub) are on the disc as .RUS only, so with
 // another language their names open as .RUS (VirtualFileSystem::SetExtensionFallback).
+// 2026-11-21: a dub (Russian, Zarudnev_voice_banks) is an overlay of those .RUS files, independent of the text language
+// (game_overlay_root + dlc_overlay_root, tools/build_voice_overlay.py). dh_voice = "russian" sets both to
+// <game data folder's parent>/voice_ru/game and .../dlc (ApplyVoice, before the runtime mounts the game data).
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
+#include <rex/filesystem/devices/pack_device.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/hook.h>
 #include <rex/logging.h>
@@ -36,6 +43,13 @@
 REXCVAR_DEFINE_STRING(dh_language, "auto", "Dishonored",
                       "Game language: auto (English, or Russian / Polish / Czech / Hungarian when that is the system "
                       "language), english, russian, polish, czech, hungarian, or disc (the disc's own choice: Russian)");
+
+REXCVAR_DEFINE_STRING(dh_voice, "english", "Dishonored",
+                      "Voices: english (the disc's) or russian (the dub: voice_ru/ beside the game data folder, "
+                      "tools/build_voice_overlay.py). Independent of dh_language. Read at startup")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DECLARE(std::string, game_overlay_root);  // system/runtime.cpp
+REXCVAR_DECLARE(std::string, dlc_overlay_root);   // system/xam/content_manager.cpp
 
 namespace {
 
@@ -144,3 +158,46 @@ REX_HOOK_RAW(sub_827713E8) {  // appGetLanguageExt(FString* out)
     }
   }
 }
+
+namespace dh::language {
+
+// dh_voice (2026-11-21): the dub's overlays as game_overlay_root and dlc_overlay_root, unless the toml sets those
+// itself. Called before the runtime mounts the game data (OnPreSetup).
+void ApplyVoice(const std::filesystem::path& game_data_root) {
+  std::string voice = REXCVAR_GET(dh_voice);
+  std::erase(voice, '"');
+  for (char& c : voice) c = char(std::tolower(static_cast<unsigned char>(c)));
+  if (voice.empty() || voice == "english") {
+    REXLOG_INFO("[dh-voice] English voices (the disc's)");
+    return;
+  }
+  if (voice != "russian") {
+    REXLOG_WARN("[dh-voice] dh_voice = \"{}\" is not known (english, russian): English voices", voice);
+    return;
+  }
+  const std::filesystem::path root = std::filesystem::absolute(game_data_root).parent_path() / "voice_ru";
+  const auto usable = [](const std::filesystem::path& p) {
+    std::error_code ec;
+    return std::filesystem::is_directory(p, ec) || rex::filesystem::PackDevice::Exists(p);
+  };
+  if (!usable(root / "game")) {
+    REXLOG_ERROR("[dh-voice] dh_voice = \"russian\", but {} has no game.nxpack (or game folder): English voices",
+                 rex::path_to_utf8(root));
+    return;
+  }
+  const auto set_unless_given = [](const char* name, std::string& storage, const std::filesystem::path& value) {
+    std::string given = storage;
+    std::erase(given, '"');
+    if (!given.empty()) {
+      REXLOG_INFO("[dh-voice] {} is set in the config ({}): left as it is", name, given);
+      return;
+    }
+    storage = rex::path_to_utf8(value);
+  };
+  set_unless_given("game_overlay_root", FLAGS_game_overlay_root_storage_(), root / "game");
+  // The DLC overlays are optional (dlc/<package>.nxpack): a package without one keeps its English voices.
+  set_unless_given("dlc_overlay_root", FLAGS_dlc_overlay_root_storage_(), root / "dlc");
+  REXLOG_INFO("[dh-voice] Russian voices from {}", rex::path_to_utf8(root));
+}
+
+}  // namespace dh::language

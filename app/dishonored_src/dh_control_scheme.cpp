@@ -38,6 +38,8 @@
 #include <rex/ppc.h>
 #include <rex/ppc/func.h>
 
+#include "dh_gyro_menu.h"
+
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -187,6 +189,7 @@ REX_HOOK_RAW(sub_829A4FA8) {
 // --- its name ------------------------------------------------------------------------------------------------------
 
 REX_HOOK_RAW(sub_822DE7F0) {
+  if (dh::gyro_menu::Localize(ctx, base)) return;  // the gyro mode's value names (dh_gyro_menu.cpp)
   const uint32_t out = ctx.r3.u32;
   if (!On() || !GuestTcharEquals(base, ctx.r5.u32, "PBS_5") ||
       !GuestTcharEquals(base, ctx.r4.u32, "ProfileSettingValues")) {
@@ -219,6 +222,7 @@ REX_HOOK_RAW(sub_8287DFC8) {
   if (!On() || !settings || (mode != 0 && mode != 3) ||
       int32_t(Load32(base, settings + kSettingsBindingSet)) != kTypeE) {
     __imp__sub_8287DFC8(ctx, base);
+    dh::gyro_menu::AfterPadSettings(base, self - 448);  // the gyro's aim button = Power/Gadget's (dh_gyro_menu.cpp)
     return;
   }
   // Type A's A and B entries, by their commands
@@ -236,6 +240,7 @@ REX_HOOK_RAW(sub_8287DFC8) {
   __imp__sub_8287DFC8(ctx, base);
   if (jump && sneak) Swap12(base, jump, sneak);
   Store32(base, settings + kSettingsBindingSet, uint32_t(kTypeE));
+  dh::gyro_menu::AfterPadSettings(base, self - 448);
   static bool logged = false;
   if (!logged) {
     logged = true;

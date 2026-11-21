@@ -42,7 +42,8 @@ REXCVAR_DEFINE_BOOL(input_xbox_layout, true, "Input",
 // left-right axis looks up and down. The physical right stick still works on top. See ApplyGyro. Off by default here
 // (the profile tomls turn it on); L+R+X / L+R+Y change the sensitivity while it is on.
 REXCVAR_DEFINE_INT32(input_gyro, 0, "Input",
-                     "Gyro aiming: 0 = off, 1 = while ZL (aim / zoom) is held, 2 = always")
+                     "Gyro aiming: 0 = off, 1 = while the aim control is held (input_gyro_aim_button, ZL by default), "
+                     "2 = always")
     .range(0, 2);
 REXCVAR_DEFINE_DOUBLE(input_gyro_sensitivity, 3.0, "Input",
                       "Gyro aiming speed: the right stick is fully pushed at 120 / sensitivity degrees per second "
@@ -54,6 +55,13 @@ REXCVAR_DEFINE_DOUBLE(input_gyro_deadzone, 1.5, "Input",
 REXCVAR_DEFINE_INT32(input_gyro_min_stick, 9500, "Input",
                      "Gyro aiming: first stick value past the deadzone, so small motions get past the game's own "
                      "stick deadzone (0-32767)");
+// 2026-11-21 (Dishonored): which control of the 360 pad counts as "aiming" for input_gyro = 1, after the face-button
+// remapping. The game sets it from its control scheme (Dishonored: the button of the left hand, Power/Gadget, is LT,
+// LB or RB depending on the scheme); 0 keeps the old behaviour (ZL, the left trigger).
+REXCVAR_DEFINE_INT32(input_gyro_aim_button, 0, "Input",
+                     "Gyro aiming mode 1 is active while this is held: 0 = left trigger (ZL), 1 = right trigger (ZR), "
+                     "2 = left shoulder (L), 3 = right shoulder (R)")
+    .range(0, 3);
 REXCVAR_DEFINE_BOOL(input_gyro_invert_x, false, "Input", "Gyro aiming: invert left/right");
 REXCVAR_DEFINE_BOOL(input_gyro_invert_y, false, "Input", "Gyro aiming: invert up/down");
 
@@ -816,7 +824,14 @@ void SwitchInputDriver::Poll(size_t index) {
   gamepad.thumb_ly = ClampStickAxis(left.y);
   int16_t thumb_rx = ClampStickAxis(right.x);
   int16_t thumb_ry = ClampStickAxis(right.y);
-  ApplyGyro(slot.gyro, slot.npad_id, (held & table.left_trigger) != 0, thumb_rx, thumb_ry);  // input_gyro
+  bool gyro_aiming = gamepad.left_trigger != 0;  // input_gyro_aim_button, on the 360 pad's controls
+  switch (REXCVAR_GET(input_gyro_aim_button)) {
+    case 1: gyro_aiming = gamepad.right_trigger != 0; break;
+    case 2: gyro_aiming = (buttons & X_INPUT_GAMEPAD_LEFT_SHOULDER) != 0; break;
+    case 3: gyro_aiming = (buttons & X_INPUT_GAMEPAD_RIGHT_SHOULDER) != 0; break;
+    default: break;
+  }
+  ApplyGyro(slot.gyro, slot.npad_id, gyro_aiming, thumb_rx, thumb_ry);  // input_gyro
   gamepad.thumb_rx = thumb_rx;
   gamepad.thumb_ry = thumb_ry;
   /*

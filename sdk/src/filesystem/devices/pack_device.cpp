@@ -226,7 +226,7 @@ X_STATUS PackFile::ReadSync(std::span<uint8_t> buffer, size_t byte_offset, size_
       byte_offset >= pack_entry_->size()) {
     return ReadSyncPack(buffer, byte_offset, out_bytes_read);
   }
-  if (!readahead_id_) readahead_id_ = RangeCacheFileId("pack:" + pack_entry_->path());
+  if (!readahead_id_) readahead_id_ = RangeCacheFileId(pack_entry_->pack()->range_key(pack_entry_->path()));
   readahead::Source source;
   source.storage = pack_entry_->pack()->storage();
   source.base = pack_entry_->data_offset();
@@ -266,7 +266,7 @@ X_STATUS PackFile::ReadSyncPack(std::span<uint8_t> buffer, size_t byte_offset, s
   const uint64_t base = pack_entry_->data_offset();
   if (n > kCacheSize / 2) {
     // me2-nx-deko (2026-11-01): exact repeats come from RAM (UE3's texture streaming rereads 128 KB blocks). The id is
-    // per pack entry ("pack:" + its path, never the same as a host file's).
+    // per pack entry (PackDevice::range_key: the pack and the entry's path, never the same as a host file's).
     const bool eligible = RangeCacheEligible(n);
     uint32_t id = 0;
     if (eligible) {
@@ -274,7 +274,7 @@ X_STATUS PackFile::ReadSyncPack(std::span<uint8_t> buffer, size_t byte_offset, s
       static thread_local uint32_t last_id = 0;
       if (last_entry != pack_entry_) {
         last_entry = pack_entry_;
-        last_id = RangeCacheFileId("pack:" + pack_entry_->path());
+        last_id = RangeCacheFileId(pack_entry_->pack()->range_key(pack_entry_->path()));
       }
       id = last_id;
       size_t got = 0;
@@ -309,7 +309,7 @@ X_STATUS PackFile::ReadSyncPack(std::span<uint8_t> buffer, size_t byte_offset, s
 // Device
 
 PackDevice::PackDevice(const std::string_view mount_path, const std::filesystem::path& folder)
-    : Device(mount_path), folder_(folder) {}
+    : Device(mount_path), folder_(folder), range_key_prefix_("pack:" + rex::path_to_utf8(PackPath(folder)) + "|") {}
 PackDevice::~PackDevice() = default;
 
 std::filesystem::path PackDevice::PackPath(const std::filesystem::path& folder) {

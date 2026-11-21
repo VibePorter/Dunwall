@@ -492,6 +492,46 @@ void ReturnPriority(Handle h) {
 }  // namespace
 #endif
 
+// Dishonored (2026-11-21, ending black screen): a critical section wait that lasts kernel_critsec_hang_report_s
+// logs the section and its owner once ("[critsec] ..." warning: guest address, lock and recursion counts, the owner's
+// name, guest and host thread ids, whether it still runs), then keeps waiting. The section's event is a
+// synchronization event, so waking up on the timeout and waiting again loses nothing. 0 = plain infinite wait.
+REXCVAR_DEFINE_INT32(kernel_critsec_hang_report_s, 5, "Kernel",
+                     "Seconds a critical section wait lasts before its owner is logged (0 = never)");
+
+static void CriticalSectionWait(X_RTL_CRITICAL_SECTION* cs, uint32_t cur_thread) {
+  static const int32_t report_s = REXCVAR_GET(kernel_critsec_hang_report_s);
+  if (report_s <= 0) {
+    xeKeWaitForSingleObject(reinterpret_cast<void*>(cs), 8, 0, 0, nullptr);
+    return;
+  }
+  uint64_t timeout = static_cast<uint64_t>(-int64_t(report_s) * 10000000);  // relative, 100 ns units
+  if (xeKeWaitForSingleObject(reinterpret_cast<void*>(cs), 8, 0, 0, &timeout) != X_STATUS_TIMEOUT) return;
+
+  auto* kernel = REX_KERNEL_STATE();
+  const uint32_t owner = cs->owning_thread;
+  std::string owner_text = "none";
+  if (owner) {
+    auto thread =
+        XObject::GetNativeObject<XThread>(kernel, kernel->memory()->TranslateVirtual<void*>(owner));
+    if (thread) {
+      owner_text = fmt::format("'{}' guest id {:X}, host id {}, {}", thread->thread_name(), thread->thread_id(),
+                               thread->thread() ? thread->thread()->system_id() : 0u,
+                               thread->is_running() ? "running" : "NOT RUNNING");
+    } else {
+      owner_text = "no thread object (exited?)";
+    }
+  }
+  auto* me = XThread::GetCurrentThread();
+  REXKRNL_WARN(
+      "[critsec] waiting {} s for section {:08X} (lock count {}, recursion {}): owner KTHREAD {:08X} = {}; "
+      "waiter '{}' KTHREAD {:08X} guest id {:X}, host id {}",
+      report_s, kernel->memory()->HostToGuestVirtual(cs), int32_t(cs->lock_count), int32_t(cs->recursion_count),
+      owner, owner_text, me ? me->thread_name() : std::string("?"), cur_thread, me ? me->thread_id() : 0u,
+      me && me->thread() ? me->thread()->system_id() : 0u);
+  xeKeWaitForSingleObject(reinterpret_cast<void*>(cs), 8, 0, 0, nullptr);
+}
+
 // default_spin: the tries for a section initialised without a spin count (kernel_critsec_spin).
 static void xeEnterCriticalSection(X_RTL_CRITICAL_SECTION* cs, uint32_t cur_thread, uint32_t default_spin) {
   REX_SYS_CENSUS(rex::syscount::kCensusCritSecEnter, 1);
@@ -546,7 +586,7 @@ static void xeEnterCriticalSection(X_RTL_CRITICAL_SECTION* cs, uint32_t cur_thre
       if (inherit) lent = LendPriority(cs, mine);
     }
 #endif
-    xeKeWaitForSingleObject(reinterpret_cast<void*>(cs), 8, 0, 0, nullptr);
+    CriticalSectionWait(cs, cur_thread);
 #if defined(__SWITCH__)
     if (urgent) {
       if (lent) ReturnPriority(lent);

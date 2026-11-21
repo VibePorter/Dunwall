@@ -207,14 +207,19 @@ constexpr u32 kSideBufferSize = 0x12C0;
 constexpr u32 kDeviceOffsetsMinusOne[] = {21968, 21972, 15340};  /* ME2 21560, 21564, 14936; Dishonored hw init sub_82B135B8, SetRingBufferParameters */  // [21560, 21564, 14936] me2: hardware init sub_82AA8A20
 constexpr u32 kDeviceTypeNoHardware = 2;
 // Copied from the global qword at 0x82F49738 into every device.
-constexpr u32 kDeviceOffsetGlobalQword = 10880;  // [10880]
+constexpr u32 kDeviceOffsetGlobalQword = 11008;  /* ME2 10880; Dishonored CreateDevice sub_82B063C8 `std r11,11008(r31)` */  // [10880]
 constexpr u32 kGlobalQwordVa = 0x83495AC8;  /* ME2 0x83387E90; Dishonored CreateDevice `lis r11,-31927; ld r11,23240(r11)` */  // [0x82F49738] me2: CreateDevice `lis r11,-31945; ld r11,32368(r11)`
 // Hardware-path fields: two critical sections, QueryPerformanceFrequency and
 // its reciprocal as floats, and 41 words set to -1.
-constexpr u32 kDeviceOffsetCriticalSection0 = 14944;  // [14944]
-constexpr u32 kDeviceOffsetCriticalSection1 = 14972;  // [14972]
-constexpr u32 kDeviceOffsetPerfFrequency = 21588;  // [21588]
-constexpr u32 kDeviceOffsetTitleMinusOne = 23380;
+// Dishonored (2026-11-21): these were still ME2's, read from Dishonored's hardware init sub_82B135B8 now. With the
+// sections at ME2's 14944/14972 the real ones (+15348 = D3D's device lock, taken by D3D's presentation thread
+// sub_82B0D9F0 and by UE3's suspend/resume rendering sub_827769B8 / sub_82776A78) stayed zeroed = "held, no owner":
+// the presentation thread blocked forever a second after start, and UE3's render thread with it the first time the
+// game suspended rendering (the Lighthouse -> epilogue hand-off: black screen, no sound).
+constexpr u32 kDeviceOffsetCriticalSection0 = 15348;  /* ME2 14944 */  // [14944]
+constexpr u32 kDeviceOffsetCriticalSection1 = 15376;  /* ME2 14972 */  // [14972]
+constexpr u32 kDeviceOffsetPerfFrequency = 21996;  /* ME2 21588; `stfs f13,21996(r31)` */  // [21588]
+constexpr u32 kDeviceOffsetTitleMinusOne = 23792;  /* ME2 23380; `addi r10,r31,23792`, 41 x stwu -1 */
 // Import slot holding the address of the kernel's VdGlobalDevice variable.
 // sa2-nx: SA2's (sub_8255C3D8 stores the title device there) [0x820007FC].
 constexpr u32 kVdGlobalDeviceImportSlot = 0x820007BC;  /* ME2 0x82000800; Dishonored IsFencePending sub_82B01D28 */  // me2: IsFencePending sub_82B01D28 (title process)
@@ -1443,9 +1448,11 @@ namespace {
 
 constexpr u32 kMe2GlobalDevice = 0x834CFE60;  /* ME2 0x833D074C; Dishonored CreateDevice `stw r31,-416(r30)` */    // D3D's device pointer (166 loads in 126 functions)
 constexpr u32 kMe2DeviceFlags3 = 11070;  /* ME2 10942 */         // the hardware path sets 0x04
-constexpr u32 kMe2DeviceSwapScratch = 10900;    // the swap's scratch word (SynchronizeToPresentationInterval) [10900] {11028}
-constexpr u32 kMe2DeviceDisplayLock = 16712;    // the hardware path zeroes it
-constexpr u32 kMe2DeviceTitleMinusOne = 23380;  // the hardware path's 41 words of -1
+// Dishonored (2026-11-21): the next three were ME2's offsets too; Dishonored's from sub_82B135B8 (the 32-byte block
+// `stw r3,11028(r31)`, `stw r30,17120(r31)` with r30 = 0, the -1 loop from +23792).
+constexpr u32 kMe2DeviceSwapScratch = 11028;    // ME2 10900: the swap's scratch word (SynchronizeToPresentationInterval) [10900] {11028}
+constexpr u32 kMe2DeviceDisplayLock = 17120;    // ME2 16712: the hardware path zeroes it
+constexpr u32 kMe2DeviceTitleMinusOne = 23792;  // ME2 23380: the hardware path's 41 words of -1
 
 u32 Me2GuestCall(PPCContext &ctx, uint8_t *base, void (*fn)(PPCContext &, uint8_t *), u32 r3, u32 r4 = 0) {
   ctx.r3.u64 = r3;

@@ -8,6 +8,10 @@
  * directories too (2026-11-01: the first version only answered lookups by name, so a listing of CookedXenon had no
  * BIOGame_RUS.tlk and the game showed its "$123456" string ids instead of the Russian text). The overlay's own device gets the base's mount path, so
  * its entries' paths are the ones the game would see without it.
+ *
+ * Dishonored (2026-11-21): the overlay can be an asset pack (<root>.nxpack + .nxidx, tools/build_asset_pack.py) as
+ * well as a folder (OpenSource), and DLC packages get one each (dlc_overlay_root, xam/content_manager.cpp): the
+ * Russian voice banks over the game's and the DLC's English ones.
  */
 
 #pragma once
@@ -25,6 +29,12 @@ class OverlayDevice : public Device {
  public:
   OverlayDevice(std::unique_ptr<Device> base, std::unique_ptr<Device> overlay);
   ~OverlayDevice() override;
+
+  // The overlay of `root`, initialized and mounted at `mount_path` (the base's): its asset pack (<root>.nxpack +
+  // .nxidx) when `allow_pack` and that exists, else the folder `root`. nullptr when neither can be read; `what`
+  // then says why, otherwise what was opened.
+  static std::unique_ptr<Device> OpenSource(const std::string_view mount_path, const std::filesystem::path& root,
+                                            bool allow_pack, std::string* what);
 
   bool Initialize() override;
   bool is_read_only() const override { return base_->is_read_only(); }
